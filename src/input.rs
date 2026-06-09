@@ -1,5 +1,7 @@
 //! Input box
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::cursor::Cursor;
 
 /// Input box with data and a cursor
@@ -77,5 +79,37 @@ impl Input {
     pub fn take(&mut self) -> String {
         self.cursor = Default::default();
         std::mem::take(&mut self.data)
+    }
+
+    /// If the character just before the cursor is `:`, look backwards for a
+    /// matching opening `:` and check if it's a valid emoji shortcode. If so,
+    /// replace `:shortcode:` with the actual emoji and adjust cursor position.
+    pub fn convert_emoji_on_colon(&mut self) {
+        let idx = self.cursor.idx;
+        if idx < 1 || !self.data.is_char_boundary(idx) {
+            return;
+        }
+        if &self.data[idx - 1..idx] != ":" {
+            return;
+        }
+
+        let before = &self.data[..idx - 1];
+        let open_pos = match before.rfind(':') {
+            Some(p) => p,
+            None => return,
+        };
+
+        let shortcode = &self.data[open_pos + 1..idx - 1];
+        let Some(emoji) = emojis::get_by_shortcode(shortcode) else {
+            return;
+        };
+        let emoji_str = emoji.as_str();
+
+        let old_width = self.data[open_pos..idx].width();
+        let emoji_width = emoji_str.width();
+
+        self.cursor.col = self.cursor.col.saturating_sub(old_width - emoji_width);
+        self.cursor.idx = open_pos + emoji_str.len();
+        self.data.replace_range(open_pos..idx, emoji_str);
     }
 }
